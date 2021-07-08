@@ -87,8 +87,8 @@ github.com/anmitsu/go-shlex v0.0.0-20161002113705-648efa622239/go.mod h1:2FmKhYU
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/aokoli/goutils v1.0.1/go.mod h1:SijmP0QR8LtwsmDs8Yii5Z/S4trXFGFC2oO5g9DP+DQ=
 github.com/apache/beam v2.28.0+incompatible/go.mod h1:/8NX3Qi8vGstDLLaeaU7+lzVEu/ACaQhYjeefzQ0y1o=
-github.com/apache/beam v2.29.0+incompatible h1:L9vCd0iu9eUdmonWGyi/zbmiQhG5BYktWsodq+OJnFI=
-github.com/apache/beam v2.29.0+incompatible/go.mod h1:/8NX3Qi8vGstDLLaeaU7+lzVEu/ACaQhYjeefzQ0y1o=
+github.com/apache/beam v2.31.0+incompatible h1:7C2/JDa+fiRJs8kAcfCHxVTf0xxwKsCFQYDMoRdr/dk=
+github.com/apache/beam v2.31.0+incompatible/go.mod h1:/8NX3Qi8vGstDLLaeaU7+lzVEu/ACaQhYjeefzQ0y1o=
 github.com/apache/thrift v0.12.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
 github.com/apache/thrift v0.13.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
 github.com/apex/log v1.1.4/go.mod h1:AlpoD9aScyQfJDVHmLMEcx4oU6LqzkWp4Mg9GdAcEvQ=
@@ -322,6 +322,7 @@ github.com/google/trillian v1.3.14-0.20210511103300-67b5f349eefa/go.mod h1:s4jO3
 github.com/google/uuid v0.0.0-20161128191214-064e2069ce9c/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/google/uuid v1.0.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/google/uuid v1.1.1/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/google/uuid v1.1.2 h1:EVhdT+1Kseyi1/pUmXKaFxYsDNy9RQYkMWRH68J/W7Y=
 github.com/google/uuid v1.1.2/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/google/wire v0.3.0/go.mod h1:i1DMg/Lu8Sz5yYl25iOdmc5CT5qusaa+zmRWs16741s=
 github.com/googleapis/gax-go v2.0.2+incompatible h1:silFMLAnr330+NRuag/VjIGF7TLp/LBrV2CJKFLWEww=
