@@ -202,6 +202,12 @@ mb8QLQIs0Z0yP5Cstq6guj87oXWeC9gEM8oVikmm9Wk=
 	}
 }
 
+/*
+BenchmarkParse/bare_minimum-4         	    7752	    174560 ns/op	    1024 B/op	      14 allocs/op
+BenchmarkParse/one_verifier-4         	    4048	    395803 ns/op	    1520 B/op	      18 allocs/op
+BenchmarkParse/many_verifiers-4       	    1612	    674900 ns/op	    2450 B/op	      25 allocs/op
+BenchmarkParse/many_sigs,_1_verifier-4      4126	    347926 ns/op	    3953 B/op	      41 allocs/op
+*/
 func BenchmarkParse(b *testing.B) {
 	baseNote := `go.sum database tree
 6476701

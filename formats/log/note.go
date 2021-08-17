@@ -23,10 +23,9 @@ import (
 // CheckpointParser is responsible for parsing checkpoints for a specific log.
 // Any valid note must have been signed by all verifiers known by this parser.
 type CheckpointParser struct {
-	logVerifier       note.Verifier
-	logID             string
-	otherVerifiers    note.Verifiers
-	requiredOtherSigs int
+	logID        string
+	verifiers    note.Verifiers
+	requiredSigs int
 }
 
 // NewCheckpointParser creates a parser for checkpoints that must be signed by the log
@@ -37,18 +36,18 @@ func NewCheckpointParser(logVKey string, logID string, otherVerifiers ...string)
 		return CheckpointParser{}, fmt.Errorf("NewVerifier(%s): %v", logVKey, err)
 	}
 
-	ovs := make([]note.Verifier, len(otherVerifiers))
+	ovs := make([]note.Verifier, len(otherVerifiers)+1)
 	for i, k := range otherVerifiers {
 		ovs[i], err = note.NewVerifier(k)
 		if err != nil {
 			return CheckpointParser{}, fmt.Errorf("NewVerifier(%s): %v", k, err)
 		}
 	}
+	ovs[len(otherVerifiers)] = logVerifier
 	return CheckpointParser{
-		logVerifier:       logVerifier,
-		logID:             logID,
-		otherVerifiers:    note.VerifierList(ovs...),
-		requiredOtherSigs: len(otherVerifiers),
+		logID:        logID,
+		verifiers:    note.VerifierList(ovs...),
+		requiredSigs: len(ovs),
 	}, nil
 }
 
@@ -56,9 +55,12 @@ func NewCheckpointParser(logVKey string, logID string, otherVerifiers ...string)
 // not be parsed, or any of the required signatures were missing.
 func (p CheckpointParser) Parse(chkptRaw []byte) (Checkpoint, *note.Note, error) {
 	r := &Checkpoint{}
-	n, err := note.Open(chkptRaw, note.VerifierList(p.logVerifier))
+	n, err := note.Open(chkptRaw, p.verifiers)
 	if err != nil {
-		return *r, n, fmt.Errorf("failed to verify log signature on checkpoint: %v", err)
+		return *r, n, fmt.Errorf("failed to verify any signatures on checkpoint: %v", err)
+	}
+	if len(n.Sigs) != p.requiredSigs {
+		return *r, n, fmt.Errorf("required %d signatures on checkpoint but got %d", p.requiredSigs, len(n.Sigs))
 	}
 	if _, err := r.Unmarshal([]byte(n.Text)); err != nil {
 		return *r, n, fmt.Errorf("failed to unmarshal new checkpoint: %v", err)
@@ -70,15 +72,5 @@ func (p CheckpointParser) Parse(chkptRaw []byte) (Checkpoint, *note.Note, error)
 		return *r, n, fmt.Errorf("got logID %q but expected %q", r.Ecosystem, p.logID)
 	}
 
-	if p.requiredOtherSigs == 0 {
-		return *r, n, nil
-	}
-
-	if n, err = note.Open(chkptRaw, p.otherVerifiers); err != nil {
-		return *r, n, fmt.Errorf("failed to verify required signatures on checkpoint: %v", err)
-	}
-	if len(n.Sigs) != p.requiredOtherSigs {
-		return *r, n, fmt.Errorf("required %d non-log signatures but got %d", p.requiredOtherSigs, len(n.Sigs))
-	}
 	return *r, n, nil
 }
