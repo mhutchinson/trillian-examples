@@ -44,14 +44,12 @@ func Bulk(ctx context.Context, first, treeSize uint64, batchFetch BatchFetch, wo
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer close(rc)
-	// Each worker gets its own unbuffered channel to make sure it can only be at most one ahead.
-	// This prevents lots of wasted work happening if one shard gets stuck.
 	rangeChans := make([]chan workerResult, workers)
 
 	sb := adaptiveSharedBackoff{}
 	increment := workers * batchSize
 	for i := uint(0); i < workers; i++ {
-		rangeChans[i] = make(chan workerResult)
+		rangeChans[i] = make(chan workerResult, 1)
 		start := first + uint64(i*batchSize)
 		go fetchWorker{
 			label:      fmt.Sprintf("worker %d", i),
