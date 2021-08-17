@@ -63,6 +63,7 @@ func TestFetchWorkerRun(t *testing.T) {
 				count:      test.batchSize,
 				out:        wrc,
 				batchFetch: fakeFetch,
+				sb:         &adaptiveSharedBackoff{},
 			}
 
 			go fw.run(context.Background())
@@ -172,12 +173,55 @@ func TestBulkCancelled(t *testing.T) {
 	}
 }
 
+func TestBackoffIsServerFriendly(t *testing.T) {
+	brc := make(chan BulkResult, 10)
+	var first uint64
+	var treeSize uint64 = 10000
+	var workers uint = 10
+	var batchSize uint = 5
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	th := throttle{
+		quota:  250,
+		refill: 250,
+	}
+	go th.startRefillLoop(ctx)
+
+	var success, requests int64
+	fakeFetch := func(start uint64, leaves [][]byte) error {
+		atomic.AddInt64(&requests, 1)
+		err := th.take(len(leaves))
+		if err == nil {
+			atomic.AddInt64(&success, 1)
+		}
+		return err
+	}
+
+	go Bulk(ctx, first, treeSize, fakeFetch, workers, batchSize, brc)
+
+	seen := 0
+	for i := 0; i < int(treeSize); i++ {
+		br := <-brc
+		if br.Err != nil {
+			t.Fatalf("unexpected error in loop: %v", br.Err)
+		}
+		seen++
+	}
+
+	sucessRatio := float64(success) / float64(requests)
+	if got, want := int(sucessRatio*100), 80; got < want {
+		t.Errorf("fewer than %d%% requests succeeded. success ratio = %d%%", want, got)
+	}
+}
+
 func BenchmarkBulk(b *testing.B) {
 	for _, test := range []struct {
 		workers    uint
 		batchSize  uint
 		fetchDelay time.Duration
-		quota      int64
+		quotaPerMs int64
 	}{
 		{
 			workers:    20,
@@ -202,11 +246,10 @@ func BenchmarkBulk(b *testing.B) {
 		{
 			workers:    20,
 			batchSize:  10,
-			fetchDelay: 50 * time.Microsecond,
-			quota:      1000,
+			quotaPerMs: 100,
 		},
 	} {
-		b.Run(fmt.Sprintf("w=%d,b=%d,delay=%s,q=%d", test.workers, test.batchSize, test.fetchDelay, test.quota), func(b *testing.B) {
+		b.Run(fmt.Sprintf("w=%d,b=%d,delay=%s,q=%d", test.workers, test.batchSize, test.fetchDelay, test.quotaPerMs), func(b *testing.B) {
 			brc := make(chan BulkResult, 10)
 			var first uint64
 
@@ -214,10 +257,10 @@ func BenchmarkBulk(b *testing.B) {
 			defer cancel()
 
 			take := func(n int) error { return nil }
-			if test.quota > 0 {
+			if test.quotaPerMs > 0 {
 				th := throttle{
-					quota:  test.quota,
-					refill: test.quota,
+					quota:  test.quotaPerMs,
+					refill: test.quotaPerMs,
 				}
 				go th.startRefillLoop(ctx)
 				take = th.take
@@ -264,7 +307,7 @@ func (t *throttle) take(n int) error {
 }
 
 func (t *throttle) startRefillLoop(ctx context.Context) {
-	tik := time.NewTicker(10 * time.Millisecond)
+	tik := time.NewTicker(1 * time.Millisecond)
 	for {
 		select {
 		case <-ctx.Done():

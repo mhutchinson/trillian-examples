@@ -18,6 +18,7 @@ package download
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	backoff "github.com/cenkalti/backoff/v4"
@@ -47,6 +48,7 @@ func Bulk(ctx context.Context, first, treeSize uint64, batchFetch BatchFetch, wo
 	// This prevents lots of wasted work happening if one shard gets stuck.
 	rangeChans := make([]chan workerResult, workers)
 
+	sb := adaptiveSharedBackoff{}
 	increment := workers * batchSize
 	for i := uint(0); i < workers; i++ {
 		rangeChans[i] = make(chan workerResult)
@@ -59,6 +61,7 @@ func Bulk(ctx context.Context, first, treeSize uint64, batchFetch BatchFetch, wo
 			increment:  uint64(increment),
 			out:        rangeChans[i],
 			batchFetch: batchFetch,
+			sb:         &sb,
 		}.run(ctx)
 	}
 
@@ -106,17 +109,13 @@ type fetchWorker struct {
 	count                      uint
 	out                        chan<- workerResult
 	batchFetch                 BatchFetch
+	sb                         *adaptiveSharedBackoff
 }
 
 func (w fetchWorker) run(ctx context.Context) {
 	glog.V(2).Infof("fetchWorker %q started", w.label)
 	defer glog.V(2).Infof("fetchWorker %q finished", w.label)
 	defer close(w.out)
-	// TODO(mhutchinson): Consider some way to reset this after intermittent connectivity issue.
-	// If this is pushed in the loop then it fixes this issue, but at the cost that the worker
-	// will never reach a stable rate if it is asked to back off. This is optimized for being
-	// gentle to the logs, which is a reasonable default for a happy ecosystem.
-	bo := backoff.NewExponentialBackOff()
 	for {
 		if w.start >= w.treeSize {
 			return
@@ -140,14 +139,46 @@ func (w fetchWorker) run(ctx context.Context) {
 			}
 			return nil
 		}
-		c.err = backoff.RetryNotify(operation, bo, func(e error, _ time.Duration) {
-			glog.V(1).Infof("%s: Retryable error getting data: %q", w.label, e)
+		c.err = backoff.RetryNotify(operation, w.sb, func(e error, _ time.Duration) {
+			glog.V(1).Infof("%s: Retryable error getting data: %q (ec=%d)", w.label, e, w.sb.ec)
 		})
 		select {
 		case <-ctx.Done():
 			return
 		case w.out <- c:
+			w.sb.success()
 		}
 		w.start += w.increment
+	}
+}
+
+const backoffDelayMs = 25
+
+// adaptiveSharedBackoff attempts to ride the edge of what quota is permitted
+// by the remote service. This backoff is shared between all workers, and allows
+// requests to go faster as they succeed, and slows them down as errors are encountered.
+type adaptiveSharedBackoff struct {
+	ec int32
+	mu sync.Mutex
+}
+
+// NextBackOff returns the duration to wait before retrying the operation.
+// This is called whenever there is a failure, so it's effectively the opposite
+// of success().
+func (sb *adaptiveSharedBackoff) NextBackOff() time.Duration {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	sb.ec += 1
+	return time.Duration(sb.ec*backoffDelayMs) * time.Millisecond
+}
+
+// This should reset to the initial state but we won't do that.
+func (sb *adaptiveSharedBackoff) Reset() {}
+
+func (sb *adaptiveSharedBackoff) success() {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	if sb.ec > 0 {
+		sb.ec -= 1
 	}
 }
