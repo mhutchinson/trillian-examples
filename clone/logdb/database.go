@@ -126,6 +126,17 @@ func (d *Database) WriteLeaves(ctx context.Context, start uint64, leaves [][]byt
 	return tx.Commit()
 }
 
+func (d *Database) LeafWriter(ctx context.Context, start uint64) (*FastWriter, error) {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("BeginTx: %w", err)
+	}
+	return &FastWriter{
+		tx:  tx,
+		idx: start,
+	}, nil
+}
+
 // StreamLeaves streams leaves in order starting at the given index, putting the leaf preimage
 // values on the `out` channel.
 func (d *Database) StreamLeaves(start, end uint64, out chan []byte, errc chan error) {
@@ -159,4 +170,21 @@ func (d *Database) Head() (int64, error) {
 		return head.Int64, nil
 	}
 	return 0, ErrNoDataFound
+}
+
+type FastWriter struct {
+	tx  *sql.Tx
+	idx uint64
+}
+
+func (fw *FastWriter) Write(l []byte) error {
+	if _, err := fw.tx.Exec("INSERT INTO leaves (id, data) VALUES (?, ?)", fw.idx, l); err != nil {
+		return err
+	}
+	fw.idx++
+	return nil
+}
+
+func (fw *FastWriter) Commit() error {
+	return fw.tx.Commit()
 }

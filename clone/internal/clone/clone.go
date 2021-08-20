@@ -96,34 +96,36 @@ func (c Cloner) Clone(ctx context.Context, treeSize uint64, fetcher download.Bat
 	}()
 
 	// This main thread will now take the downloaded leaves, batch them, and write to the DB.
-	batch := make([][]byte, c.writeBatchSize)
+	writer, err := c.db.LeafWriter(ctx, next)
+	if err != nil {
+		return fmt.Errorf("LeafWriter(): %v", err)
+	}
 	bi := 0
-	bs := next
 	for br := range brc {
 		if br.Err != nil {
 			return fmt.Errorf("failed to get leaf at %d: %v", next, br.Err)
 		}
 		workDone := r.trackWork(next)
 		next++
-		batch[bi] = br.Leaf
+		writer.Write(br.Leaf)
 		bi = (bi + 1) % int(c.writeBatchSize)
 		if bi == 0 {
-			if err := c.db.WriteLeaves(ctx, bs, batch); err != nil {
-				return fmt.Errorf("failed to write to DB for batch starting at %d: %q", bs, err)
+			if err := writer.Commit(); err != nil {
+				return fmt.Errorf("Commit(): %v", err)
 			}
-			bs = next
+			writer, err = c.db.LeafWriter(ctx, next)
+			if err != nil {
+				return fmt.Errorf("LeafWriter(): %v", err)
+			}
 		}
 		workDone()
 	}
-	// All leaves are downloaded, but make sure we write the final (maybe partial) batch.
-	if bi > 0 {
-		if err := c.db.WriteLeaves(ctx, bs, batch[:bi]); err != nil {
-			return fmt.Errorf("failed to write to DB for final batch starting at %d: %q", bs, err)
-		}
+	if err := writer.Commit(); err != nil {
+		return fmt.Errorf("Commit(): %v", err)
 	}
 	// Log a final report and then return.
 	r.report()
-	glog.Infof("Downloaded %d leaves", bs+uint64(bi))
+	glog.Infof("Downloaded %d leaves", next)
 	return nil
 }
 
