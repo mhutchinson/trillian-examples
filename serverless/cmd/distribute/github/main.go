@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -45,7 +46,7 @@ Where:
  --distributor_branch is the name of the primary branch on the distributor repo (e.g. main).
  --fork_repo is the repo owner/fragment of the forked distributor to use for the PR branch.
  --distributor_path is the path from the root of the repo where the distributor files can be found,
- --config_file is the path to the config file for the serverless/cmd/feeder command.
+ --config_file is the path to the config file for the serverless/cmd/distribute/github command.
  --interval if set, the script will continuously feed and (if needed) create witness PRs sleeping
      the specified number of seconds between attempts. If not provided, the tool does a one-shot feed.
 
@@ -56,7 +57,8 @@ var (
 	distributorBranch = flag.String("distributor_branch", "master", "The branch that PRs will be proposed against on the distributor_repo.")
 	forkRepo          = flag.String("fork_repo", "", "The repo owner/fragment from the feeder (forked distributor) repo URL.")
 	distributorPath   = flag.String("distributor_path", "", "Path from the root of the repo where the distributor files can be found.")
-	configPath        = flag.String("config_file", "", "Path to the config file for the serverless/cmd/feeder command.")
+	configPath        = flag.String("config_file", "", "Path to the config file for the serverless/cmd/distribute/github command.")
+	configB64         = flag.String("config_b64", "", "Configuration yaml file encoded as b64, as an alternative to config_file.")
 	interval          = flag.Duration("interval", time.Duration(0), "Interval between checkpoints. Default of 0 causes the tool to be a one-shot.")
 )
 
@@ -121,9 +123,24 @@ func mustConfigure(ctx context.Context) *dist_gh.DistributeOptions {
 		usageExit(fmt.Sprintf("--fork_repo invalid: %v", err))
 	}
 
-	cfg, err := readConfig(*configPath)
-	if err != nil {
-		glog.Exitf("Feeder config in %q is invalid: %v", *configPath, err)
+	if len(*configPath) == 0 && len(*configB64) == 0 {
+		usageExit("Missing required --config_path OR --config_b64 flags")
+	}
+	var cfg distributeConfig
+	if len(*configPath) > 0 {
+		cfg, err = readConfig(*configPath)
+		if err != nil {
+			glog.Exitf("Feeder config in %q is invalid: %v", *configPath, err)
+		}
+	} else {
+		bs, err := base64.RawStdEncoding.DecodeString(*configB64)
+		if err != nil {
+			glog.Exitf("Failed to decode --config_b64 string")
+		}
+		cfg, err = unmarshalConfig(bs)
+		if err != nil {
+			glog.Exitf("Feeder config in --config_b64 is invalid: %v", *configPath, err)
+		}
 	}
 
 	u, err := url.Parse(cfg.Witness.URL)
@@ -175,18 +192,22 @@ func (c distributeConfig) Validate() error {
 	return c.Witness.Validate()
 }
 
-// readConfig parses the named file into a FeedOpts structure.
+// readConfig parses the named file into a distributeConfig structure.
 func readConfig(f string) (distributeConfig, error) {
-	cfg := distributeConfig{}
 	c, err := ioutil.ReadFile(f)
 	if err != nil {
-		return cfg, fmt.Errorf("failed to read file: %v", err)
+		return distributeConfig{}, fmt.Errorf("failed to read file: %v", err)
 	}
-	if err := yaml.Unmarshal(c, &cfg); err != nil {
+	return unmarshalConfig(c)
+}
+
+func unmarshalConfig(bs []byte) (distributeConfig, error) {
+	cfg := distributeConfig{}
+	if err := yaml.Unmarshal(bs, &cfg); err != nil {
 		return cfg, fmt.Errorf("failed to unmarshal config: %v", err)
 	}
 	if err := cfg.Validate(); err != nil {
-		return cfg, fmt.Errorf("invalid config at %q: %v", f, err)
+		return cfg, fmt.Errorf("invalid config: %v", err)
 	}
 	return cfg, nil
 }
