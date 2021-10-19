@@ -18,7 +18,7 @@ require (
 	github.com/google/go-github/v37 v37.0.0
 	github.com/google/trillian v1.3.14-0.20210720093003-785d9ecb206b
 	github.com/gorilla/mux v1.8.0
-	github.com/mattn/go-sqlite3 v1.14.8
+	github.com/mattn/go-sqlite3 v1.14.9
 	github.com/perlin-network/life v0.0.0-20191203030451-05c0e0f7eaea
 	github.com/u-root/u-root v7.0.0+incompatible
 	golang.org/x/crypto v0.0.0-20210421170649-83a5a9bb288b
