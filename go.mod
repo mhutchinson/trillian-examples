@@ -22,10 +22,10 @@ require (
 	github.com/u-root/u-root v7.0.0+incompatible
 	github.com/usbarmory/imx-usbnet v0.0.0-20220317105544-a29e0d6b2167
 	github.com/usbarmory/tamago v0.0.0-20220317131509-7fbcfbeb1abb
-	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5
-	golang.org/x/mod v0.5.1
+	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
+	golang.org/x/mod v0.7.0
 	golang.org/x/oauth2 v0.0.0-20210819190943-2bc19b11175f
-	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
 	google.golang.org/grpc v1.47.0
 	google.golang.org/protobuf v1.28.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
