@@ -93,7 +93,7 @@ func (s *Server) getCheckpointWitness(w http.ResponseWriter, r *http.Request) {
 	witID := v["witid"]
 
 	// Get the signed checkpoint from the witness.
-	chkpt, err := s.d.GetCheckpointWitness(logID, witID)
+	chkpt, err := s.d.GetCheckpointWitness(r.Context(), logID, witID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to get checkpoint: %v", err), httpForCode(status.Code(err)))
 		return
@@ -104,7 +104,7 @@ func (s *Server) getCheckpointWitness(w http.ResponseWriter, r *http.Request) {
 
 // getLogs returns a list of all logs the witness is aware of.
 func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
-	logs, err := s.d.GetLogs()
+	logs, err := s.d.GetLogs(r.Context())
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to get log list: %v", err), http.StatusInternalServerError)
 		return

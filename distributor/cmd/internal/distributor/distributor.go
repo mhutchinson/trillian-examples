@@ -17,31 +17,161 @@
 package distributor
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"database/sql"
+	"fmt"
+
+	"github.com/transparency-dev/formats/log"
+	"golang.org/x/mod/sumdb/note"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type Distributor struct {
-	// Maybe use note.Verifiers
+	ws Witnesses
+	ls Logs
+	ca CheckpointAggregator
+	db *sql.DB
 }
 
 // GetLogs returns a list of all logs the distributor is aware of.
-func (d *Distributor) GetLogs() ([]string, error) {
-	return nil, errors.New("not implemented")
+func (d *Distributor) GetLogs(ctx context.Context) ([]string, error) {
+	r := make([]string, len(d.ls))
+	for k := range d.ls {
+		r = append(r, k)
+	}
+	return r, nil
 }
 
 // GetCheckpointN gets a checkpoint for a given log, which is consistent with all
 // other checkpoints for the same log signed by this witness.
 func (d *Distributor) GetCheckpointN(logID string, sigs uint32) ([]byte, error) {
-	return nil, errors.New("not implemented")
+	return d.ca.Get(logID, sigs)
 }
 
 // GetCheckpointWitness gets a checkpoint for a given log, witnessed by the given witness.
-func (d *Distributor) GetCheckpointWitness(logID, witID string) ([]byte, error) {
-	return nil, errors.New("not implemented")
+func (d *Distributor) GetCheckpointWitness(ctx context.Context, logID, witID string) ([]byte, error) {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	return getLatestCheckpoint(tx, logID, witID)
 }
 
 // Distribute adds a new signed checkpoint to be distributed.
 func (d *Distributor) Distribute(ctx context.Context, logID, witID string, nextRaw []byte) error {
-	return errors.New("not implemented")
+	l, ok := d.ls[logID]
+	if !ok {
+		return fmt.Errorf("unknown log ID %q", witID)
+	}
+	wv, ok := d.ws[witID]
+	if !ok {
+		return fmt.Errorf("unknown witness ID %q", witID)
+	}
+	newCP, _, _, err := log.ParseCheckpoint(nextRaw, l.Origin, l.Verifier, wv)
+	if err != nil {
+		return err
+	}
+
+	// This is a valid checkpoint for this log for this witness
+	// Now find the previous checkpoint if one exists.
+
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	oldBs, err := getLatestCheckpoint(tx, logID, witID)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			// If this is the first checkpoint for this witness then just save and exit
+			return d.saveCheckpoint(tx, logID, witID, newCP.Size, nextRaw)
+		}
+		return err
+	}
+
+	// We have the previous checkpoint, now check that the new one is fresher
+
+	oldCP, _, _, err := log.ParseCheckpoint(oldBs, l.Origin, l.Verifier, wv)
+	if err != nil {
+		// This really shouldn't ever happen unless the DB is corrupted or the config
+		// for the log or verifier has changed.
+		return err
+	}
+	if newCP.Size < oldCP.Size {
+		return fmt.Errorf("checkpoint for log %q and witness %q is for size %d, cannot update to size %d", logID, witID, oldCP.Size, newCP.Size)
+	}
+	if newCP.Size == oldCP.Size {
+		if !bytes.Equal(newCP.Hash, oldCP.Hash) {
+			// TODO(mhutchinson): this error case is more than just a server error and proves witness is bad!
+			return fmt.Errorf("old checkpoint for tree size %d had hash %x but new one has %x", newCP.Size, oldCP.Hash, newCP.Hash)
+		}
+		// Nothing to do; checkpoint is equivalent to the old one so avoid DB writes.
+		return nil
+	}
+	return d.saveCheckpoint(tx, logID, witID, newCP.Size, nextRaw)
+}
+
+func (d *Distributor) saveCheckpoint(tx *sql.Tx, logID, witID string, treeSize uint64, cp []byte) error {
+	_, err := tx.Exec(`INSERT OR REPLACE INTO chkpts (logID, witID, treeSize, chkpt) VALUES (?, ?, ?)`, logID, witID, treeSize, cp)
+	if err != nil {
+		return fmt.Errorf("Exec(): %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// TODO(mhutchinson): perhaps this should take a channel to report to instead of being a
+	// member of the Distributor and calling ca directly.
+	d.ca.Add(logID, cp)
+	return nil
+}
+
+func getLatestCheckpoint(tx *sql.Tx, logID, witID string) ([]byte, error) {
+	row := tx.QueryRow("SELECT chkpt FROM chkpts WHERE logID = ? AND witID = ?", logID, witID)
+	if err := row.Err(); err != nil {
+		return nil, err
+	}
+	var chkpt []byte
+	if err := row.Scan(&chkpt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, status.Errorf(codes.NotFound, "no checkpoint for log %q", logID)
+		}
+		return nil, err
+	}
+	return chkpt, nil
+}
+
+type Witnesses map[string]note.Verifier
+
+type Logs map[string]LogInfo
+
+type LogInfo struct {
+	Origin   string
+	Verifier note.Verifier
+}
+
+type AggregatedCheckpoint struct {
+	N          uint32
+	Checkpoint []byte
+}
+
+// CheckpointAggregator updates the checkpoint.N aggregations.
+type CheckpointAggregator struct {
+	// logID -> sorted (by N, inc) list of aggregated checkpoints.
+	LogAggregatedCheckpoints map[string][]AggregatedCheckpoint
+}
+
+func (ca CheckpointAggregator) Add(logID string, rawCP []byte) {
+	_ = ca.LogAggregatedCheckpoints[logID]
+	// TODO(mhutchinson): take a look at the code already in the github distributors
+}
+
+func (ca CheckpointAggregator) Get(logID string, n uint32) ([]byte, error) {
+	acps := ca.LogAggregatedCheckpoints[logID]
+	for _, acp := range acps {
+		if acp.N >= n {
+			return acp.Checkpoint, nil
+		}
+	}
+	return nil, fmt.Errorf("no checkpoint found for log %q with size %d", logID, n)
 }
