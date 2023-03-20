@@ -21,6 +21,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 
 	"github.com/transparency-dev/formats/log"
 	"golang.org/x/mod/sumdb/note"
@@ -28,19 +29,40 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+func NewDistributor(ws Witnesses, ls Logs, db *sql.DB) *Distributor {
+	return &Distributor{
+		ws: ws,
+		ls: ls,
+		db: db,
+		ca: CheckpointAggregator{}, // TODO(mhutchinson): initialize this
+	}
+}
+
 type Distributor struct {
 	ws Witnesses
 	ls Logs
-	ca CheckpointAggregator
 	db *sql.DB
+	ca CheckpointAggregator
+}
+
+func (d *Distributor) Init() error {
+	_, err := d.db.Exec(`CREATE TABLE IF NOT EXISTS chkpts (
+		logID BLOB,
+		witID BLOB,
+		treeSize INTEGER,
+		chkpt BLOB,
+		PRIMARY KEY (logID, witID)
+		)`)
+	return err
 }
 
 // GetLogs returns a list of all logs the distributor is aware of.
 func (d *Distributor) GetLogs(ctx context.Context) ([]string, error) {
-	r := make([]string, len(d.ls))
+	r := make([]string, 0, len(d.ls))
 	for k := range d.ls {
 		r = append(r, k)
 	}
+	sort.Strings(r)
 	return r, nil
 }
 
@@ -69,9 +91,12 @@ func (d *Distributor) Distribute(ctx context.Context, logID, witID string, nextR
 	if !ok {
 		return fmt.Errorf("unknown witness ID %q", witID)
 	}
-	newCP, _, _, err := log.ParseCheckpoint(nextRaw, l.Origin, l.Verifier, wv)
+	newCP, _, n, err := log.ParseCheckpoint(nextRaw, l.Origin, l.Verifier, wv)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse checkpoint: %v", err)
+	}
+	if len(n.Sigs) != 2 {
+		return fmt.Errorf("failed to verify log and witness signatures; only verified: %v", n.Sigs)
 	}
 
 	// This is a valid checkpoint for this log for this witness
@@ -113,7 +138,7 @@ func (d *Distributor) Distribute(ctx context.Context, logID, witID string, nextR
 }
 
 func (d *Distributor) saveCheckpoint(tx *sql.Tx, logID, witID string, treeSize uint64, cp []byte) error {
-	_, err := tx.Exec(`INSERT OR REPLACE INTO chkpts (logID, witID, treeSize, chkpt) VALUES (?, ?, ?)`, logID, witID, treeSize, cp)
+	_, err := tx.Exec(`INSERT OR REPLACE INTO chkpts (logID, witID, treeSize, chkpt) VALUES (?, ?, ?, ?)`, logID, witID, treeSize, cp)
 	if err != nil {
 		return fmt.Errorf("Exec(): %v", err)
 	}
