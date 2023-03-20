@@ -288,6 +288,78 @@ func TestDistributeEvolution(t *testing.T) {
 	}
 }
 
+func TestGetCheckpointWitness(t *testing.T) {
+	// The base case for this test is that a single checkpoint has already
+	// been registered for log foo, by whittle, at tree size 16, with root hash H("16").
+	ws := distributor.Witnesses{
+		"Whittle": witWhittle.verifier,
+		"Wattle":  witWattle.verifier,
+	}
+	ls := distributor.Logs{
+		"FooLog": logFoo.LogInfo,
+		"BarLog": logBar.LogInfo,
+	}
+	testCases := []struct {
+		desc    string
+		log     fakeLog
+		wit     fakeWitness
+		wantErr bool
+	}{
+		{
+			desc:    "read back same cp",
+			log:     logFoo,
+			wit:     witWhittle,
+			wantErr: false,
+		},
+		{
+			desc:    "same log, different witness",
+			log:     logFoo,
+			wit:     witWattle,
+			wantErr: true,
+		},
+		{
+			desc:    "different log, same witness",
+			log:     logBar,
+			wit:     witWhittle,
+			wantErr: true,
+		},
+		{
+			desc:    "different log, different witness",
+			log:     logBar,
+			wit:     witWattle,
+			wantErr: true,
+		},
+	}
+	for _, tC := range testCases {
+		t.Run(tC.desc, func(t *testing.T) {
+			sqlitedb, err := sql.Open("sqlite3", ":memory:")
+			if err != nil {
+				t.Fatalf("failed to open temporary in-memory DB: %v", err)
+			}
+			d := distributor.NewDistributor(ws, ls, sqlitedb)
+			if err := d.Init(); err != nil {
+				t.Fatalf("Init(): %v", err)
+			}
+			writeCP := logFoo.checkpoint(16, "16", witWhittle.signer)
+			err = d.Distribute(context.Background(), "FooLog", "Whittle", writeCP)
+			if err != nil {
+				t.Fatalf("Distribute(): %v", err)
+			}
+
+			readCP, err := d.GetCheckpointWitness(context.Background(), tC.log.Verifier.Name(), tC.wit.verifier.Name())
+			if (err != nil) != tC.wantErr {
+				t.Errorf("unexpected error output (wantErr: %t): %v", tC.wantErr, err)
+			}
+			if !tC.wantErr {
+
+				if !cmp.Equal(readCP, writeCP) {
+					t.Errorf("Written checkpoint != read checkpoint. Read\n%v\n\nWrote:\n%v", readCP, writeCP)
+				}
+			}
+		})
+	}
+}
+
 func verifierOrDie(vkey string) note.Verifier {
 	v, err := note.NewVerifier(vkey)
 	if err != nil {
