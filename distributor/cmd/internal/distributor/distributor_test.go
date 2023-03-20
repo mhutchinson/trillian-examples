@@ -144,6 +144,22 @@ func TestDistributeLogAndWitnessMustMatchCheckpoint(t *testing.T) {
 			wit:      witWattle,
 			wantErr:  true,
 		},
+		{
+			desc:     "Unknown log known witness",
+			reqLogID: "DogNotLog",
+			reqWitID: "Wattle",
+			log:      logFoo,
+			wit:      witWattle,
+			wantErr:  true,
+		},
+		{
+			desc:     "Correct log unkown witness",
+			reqLogID: "FooLog",
+			reqWitID: "WhatAWally",
+			log:      logFoo,
+			wit:      witWattle,
+			wantErr:  true,
+		},
 	}
 	for _, tC := range testCases {
 		t.Run(tC.desc, func(t *testing.T) {
