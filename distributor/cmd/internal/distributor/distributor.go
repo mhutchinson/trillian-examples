@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/golang/glog"
 	"github.com/transparency-dev/formats/log"
 	"golang.org/x/mod/sumdb/note"
 	"google.golang.org/grpc/codes"
@@ -128,7 +129,7 @@ func (d *Distributor) Distribute(ctx context.Context, logID, witID string, nextR
 	}
 	if newCP.Size == oldCP.Size {
 		if !bytes.Equal(newCP.Hash, oldCP.Hash) {
-			// TODO(mhutchinson): this error case is more than just a server error and proves witness is bad!
+			reportInconsistency(oldBs, nextRaw)
 			return fmt.Errorf("old checkpoint for tree size %d had hash %x but new one has %x", newCP.Size, oldCP.Hash, newCP.Hash)
 		}
 		// Nothing to do; checkpoint is equivalent to the old one so avoid DB writes.
@@ -164,6 +165,16 @@ func getLatestCheckpoint(tx *sql.Tx, logID, witID string) ([]byte, error) {
 		return nil, err
 	}
 	return chkpt, nil
+}
+
+// reportInconsistency makes a note when two checkpoints are found for the same
+// log tree size, but with different hashes.
+// For now, this simply logs an error, but this could be upgraded to write to a
+// new DB table containing this kind of evidence. Care needs to be taken if this
+// approach is followed to ensure that the DB size stays limited, i.e. don't allow
+// the same/similar inconsistencies to be written indefinitely.
+func reportInconsistency(oldCP, newCP []byte) {
+	glog.Errorf("Found inconsistent checkpoints:\n%v\n\n%v", oldCP, newCP)
 }
 
 type Witnesses map[string]note.Verifier
