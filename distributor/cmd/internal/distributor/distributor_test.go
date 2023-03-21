@@ -360,6 +360,48 @@ func TestGetCheckpointWitness(t *testing.T) {
 	}
 }
 
+func TestGetCheckpointN(t *testing.T) {
+	ws := distributor.Witnesses{
+		"Whittle": witWhittle.verifier,
+		"Wattle":  witWattle.verifier,
+	}
+	ls := distributor.Logs{
+		"FooLog": logFoo.LogInfo,
+		"BarLog": logBar.LogInfo,
+	}
+	sqlitedb, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open temporary in-memory DB: %v", err)
+	}
+	d := distributor.NewDistributor(ws, ls, sqlitedb)
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init(): %v", err)
+	}
+
+	if err := d.Distribute(context.Background(), "FooLog", "Whittle", logFoo.checkpoint(16, "16", witWhittle.signer)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Distribute(context.Background(), "FooLog", "Wattle", logFoo.checkpoint(10, "10", witWattle.signer)); err != nil {
+		t.Fatal(err)
+	}
+
+	l := logFoo
+	vs := []note.Verifier{witWhittle.verifier}
+
+	cpRaw, err := d.GetCheckpointN(l.Verifier.Name(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp, _, n, err := log.ParseCheckpoint(cpRaw, l.Origin, l.Verifier, vs...)
+	if err != nil {
+		t.Error(err)
+	}
+	if got, want := len(n.Sigs), 1+len(vs); got != want {
+		t.Errorf("expected %d sigs, got %d", want, got)
+	}
+	_ = cp
+}
+
 func verifierOrDie(vkey string) note.Verifier {
 	v, err := note.NewVerifier(vkey)
 	if err != nil {
