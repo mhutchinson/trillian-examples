@@ -352,7 +352,6 @@ func TestGetCheckpointWitness(t *testing.T) {
 				t.Errorf("unexpected error output (wantErr: %t): %v", tC.wantErr, err)
 			}
 			if !tC.wantErr {
-
 				if !cmp.Equal(readCP, writeCP) {
 					t.Errorf("Written checkpoint != read checkpoint. Read\n%v\n\nWrote:\n%v", readCP, writeCP)
 				}
@@ -376,7 +375,7 @@ func TestGetCheckpointN(t *testing.T) {
 		distLog  fakeLog
 		distSize uint64
 		reqLog   string
-		reqN     uint
+		reqN     uint32
 		wantErr  bool
 		wantSize uint64
 		wantWits []note.Verifier
@@ -425,6 +424,15 @@ func TestGetCheckpointN(t *testing.T) {
 			wantSize: 16,
 			wantWits: []note.Verifier{witWattle.verifier, witWhittle.verifier},
 		},
+		{
+			desc:     "error returned if not enough sigs",
+			distWit:  witWattle,
+			distLog:  logFoo,
+			distSize: 16,
+			reqLog:   "FooLog",
+			reqN:     3,
+			wantErr:  true,
+		},
 	}
 	for _, tC := range testCases {
 		t.Run(tC.desc, func(t *testing.T) {
@@ -444,19 +452,21 @@ func TestGetCheckpointN(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			cpRaw, err := d.GetCheckpointN(context.Background(), tC.distLog.Verifier.Name(), 1)
-			if err != nil {
-				t.Fatal(err)
+			cpRaw, err := d.GetCheckpointN(context.Background(), tC.reqLog, tC.reqN)
+			if (err != nil) != tC.wantErr {
+				t.Fatalf("unexpected error output (wantErr: %t): %v", tC.wantErr, err)
 			}
-			cp, _, n, err := log.ParseCheckpoint(cpRaw, tC.distLog.Origin, tC.distLog.Verifier, tC.wantWits...)
-			if err != nil {
-				t.Error(err)
-			}
-			if got, want := len(n.Sigs), 1+len(tC.wantWits); got != want {
-				t.Errorf("expected %d sigs, got %d", want, got)
-			}
-			if cp.Size != tC.wantSize {
-				t.Errorf("expected tree size of %d but got %d", tC.wantSize, cp.Size)
+			if !tC.wantErr {
+				cp, _, n, err := log.ParseCheckpoint(cpRaw, tC.distLog.Origin, tC.distLog.Verifier, tC.wantWits...)
+				if err != nil {
+					t.Error(err)
+				}
+				if got, want := len(n.Sigs), 1+len(tC.wantWits); got != want {
+					t.Errorf("expected %d sigs, got %d", want, got)
+				}
+				if cp.Size != tC.wantSize {
+					t.Errorf("expected tree size of %d but got %d", tC.wantSize, cp.Size)
+				}
 			}
 		})
 	}
