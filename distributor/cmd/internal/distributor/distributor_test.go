@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -369,37 +370,96 @@ func TestGetCheckpointN(t *testing.T) {
 		"FooLog": logFoo.LogInfo,
 		"BarLog": logBar.LogInfo,
 	}
-	sqlitedb, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open temporary in-memory DB: %v", err)
+	testCases := []struct {
+		desc     string
+		distWit  fakeWitness
+		distLog  fakeLog
+		distSize uint64
+		reqLog   string
+		reqN     uint
+		wantErr  bool
+		wantSize uint64
+		wantWits []note.Verifier
+	}{
+		{
+			desc:     "smaller checkpoint doesn't win",
+			distWit:  witWattle,
+			distLog:  logFoo,
+			distSize: 10,
+			reqLog:   "FooLog",
+			reqN:     1,
+			wantErr:  false,
+			wantSize: 16,
+			wantWits: []note.Verifier{witWhittle.verifier},
+		},
+		{
+			desc:     "larger checkpoint wins",
+			distWit:  witWattle,
+			distLog:  logFoo,
+			distSize: 20,
+			reqLog:   "FooLog",
+			reqN:     1,
+			wantErr:  false,
+			wantSize: 20,
+			wantWits: []note.Verifier{witWattle.verifier},
+		},
+		{
+			desc:     "same size checkpoint merges",
+			distWit:  witWattle,
+			distLog:  logFoo,
+			distSize: 16,
+			reqLog:   "FooLog",
+			reqN:     2,
+			wantErr:  false,
+			wantSize: 16,
+			wantWits: []note.Verifier{witWattle.verifier, witWhittle.verifier},
+		},
+		{
+			desc:     "more sigs can be returned than needed",
+			distWit:  witWattle,
+			distLog:  logFoo,
+			distSize: 16,
+			reqLog:   "FooLog",
+			reqN:     1,
+			wantErr:  false,
+			wantSize: 16,
+			wantWits: []note.Verifier{witWattle.verifier, witWhittle.verifier},
+		},
 	}
-	d := distributor.NewDistributor(ws, ls, sqlitedb)
-	if err := d.Init(); err != nil {
-		t.Fatalf("Init(): %v", err)
-	}
+	for _, tC := range testCases {
+		t.Run(tC.desc, func(t *testing.T) {
+			sqlitedb, err := sql.Open("sqlite3", ":memory:")
+			if err != nil {
+				t.Fatalf("failed to open temporary in-memory DB: %v", err)
+			}
+			d := distributor.NewDistributor(ws, ls, sqlitedb)
+			if err := d.Init(); err != nil {
+				t.Fatalf("Init(): %v", err)
+			}
+			if err := d.Distribute(context.Background(), "FooLog", "Whittle", logFoo.checkpoint(16, "16", witWhittle.signer)); err != nil {
+				t.Fatal(err)
+			}
 
-	if err := d.Distribute(context.Background(), "FooLog", "Whittle", logFoo.checkpoint(16, "16", witWhittle.signer)); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Distribute(context.Background(), "FooLog", "Wattle", logFoo.checkpoint(10, "10", witWattle.signer)); err != nil {
-		t.Fatal(err)
-	}
+			if err := d.Distribute(context.Background(), tC.reqLog, tC.distWit.verifier.Name(), tC.distLog.checkpoint(tC.distSize, fmt.Sprintf("%d", tC.distSize), tC.distWit.signer)); err != nil {
+				t.Fatal(err)
+			}
 
-	l := logFoo
-	vs := []note.Verifier{witWhittle.verifier}
-
-	cpRaw, err := d.GetCheckpointN(l.Verifier.Name(), 1)
-	if err != nil {
-		t.Fatal(err)
+			cpRaw, err := d.GetCheckpointN(context.Background(), tC.distLog.Verifier.Name(), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cp, _, n, err := log.ParseCheckpoint(cpRaw, tC.distLog.Origin, tC.distLog.Verifier, tC.wantWits...)
+			if err != nil {
+				t.Error(err)
+			}
+			if got, want := len(n.Sigs), 1+len(tC.wantWits); got != want {
+				t.Errorf("expected %d sigs, got %d", want, got)
+			}
+			if cp.Size != tC.wantSize {
+				t.Errorf("expected tree size of %d but got %d", tC.wantSize, cp.Size)
+			}
+		})
 	}
-	cp, _, n, err := log.ParseCheckpoint(cpRaw, l.Origin, l.Verifier, vs...)
-	if err != nil {
-		t.Error(err)
-	}
-	if got, want := len(n.Sigs), 1+len(vs); got != want {
-		t.Errorf("expected %d sigs, got %d", want, got)
-	}
-	_ = cp
 }
 
 func verifierOrDie(vkey string) note.Verifier {

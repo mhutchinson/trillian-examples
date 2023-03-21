@@ -24,6 +24,7 @@ import (
 	"sort"
 
 	"github.com/golang/glog"
+	"github.com/google/trillian-examples/formats/checkpoints"
 	"github.com/transparency-dev/formats/log"
 	"golang.org/x/mod/sumdb/note"
 	"google.golang.org/grpc/codes"
@@ -35,7 +36,6 @@ func NewDistributor(ws Witnesses, ls Logs, db *sql.DB) *Distributor {
 		ws: ws,
 		ls: ls,
 		db: db,
-		ca: CheckpointAggregator{}, // TODO(mhutchinson): initialize this
 	}
 }
 
@@ -43,7 +43,6 @@ type Distributor struct {
 	ws Witnesses
 	ls Logs
 	db *sql.DB
-	ca CheckpointAggregator
 }
 
 func (d *Distributor) Init() error {
@@ -69,8 +68,62 @@ func (d *Distributor) GetLogs(ctx context.Context) ([]string, error) {
 
 // GetCheckpointN gets a checkpoint for a given log, which is consistent with all
 // other checkpoints for the same log signed by this witness.
-func (d *Distributor) GetCheckpointN(logID string, sigs uint32) ([]byte, error) {
-	return d.ca.Get(logID, sigs)
+func (d *Distributor) GetCheckpointN(ctx context.Context, logID string, sigs uint32) ([]byte, error) {
+	l, ok := d.ls[logID]
+	if !ok {
+		return nil, fmt.Errorf("unknown log ID %q", logID)
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT treeSize, witID, chkpt FROM chkpts WHERE logID = ? ORDER BY treeSize DESC", logID)
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %v", err)
+	}
+	var currentSize uint64
+	var witsAtSize []string
+	var cpsAtSize [][]byte
+	var size uint64
+	var widID string
+	var cp []byte
+	for rows.Next() {
+		if err := rows.Scan(&size, &widID, &cp); err != nil {
+			return nil, fmt.Errorf("failed to scan rows: %v", err)
+		}
+		if size != currentSize {
+			if len(cpsAtSize) >= int(sigs) {
+				witVs := make([]note.Verifier, len(witsAtSize))
+				for i, witID := range witsAtSize {
+					witVs[i] = d.ws[witID]
+				}
+				cp, err := checkpoints.Combine(cpsAtSize, l.Verifier, note.VerifierList(witVs...))
+				if err != nil {
+					return nil, fmt.Errorf("failed to combine sigs: %v", err)
+				}
+				return cp, nil
+			}
+			cpsAtSize = make([][]byte, 0)
+			currentSize = size
+		}
+		witsAtSize = append(witsAtSize, widID)
+		cpsAtSize = append(cpsAtSize, cp)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan rows: %v", err)
+	}
+	if len(cpsAtSize) >= int(sigs) {
+		witVs := make([]note.Verifier, len(witsAtSize))
+		for i, witID := range witsAtSize {
+			witVs[i] = d.ws[witID]
+		}
+		cp, err := checkpoints.Combine(cpsAtSize, l.Verifier, note.VerifierList(witVs...))
+		if err != nil {
+			return nil, fmt.Errorf("failed to combine sigs: %v", err)
+		}
+		return cp, nil
+	}
+	return nil, fmt.Errorf("no checkpoint with %d signatures found", sigs)
 }
 
 // GetCheckpointWitness gets a checkpoint for a given log, witnessed by the given witness.
@@ -86,7 +139,7 @@ func (d *Distributor) GetCheckpointWitness(ctx context.Context, logID, witID str
 func (d *Distributor) Distribute(ctx context.Context, logID, witID string, nextRaw []byte) error {
 	l, ok := d.ls[logID]
 	if !ok {
-		return fmt.Errorf("unknown log ID %q", witID)
+		return fmt.Errorf("unknown log ID %q", logID)
 	}
 	wv, ok := d.ws[witID]
 	if !ok {
@@ -146,9 +199,6 @@ func (d *Distributor) saveCheckpoint(tx *sql.Tx, logID, witID string, treeSize u
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	// TODO(mhutchinson): perhaps this should take a channel to report to instead of being a
-	// member of the Distributor and calling ca directly.
-	d.ca.Add(logID, cp)
 	return nil
 }
 
@@ -189,25 +239,4 @@ type LogInfo struct {
 type AggregatedCheckpoint struct {
 	N          uint32
 	Checkpoint []byte
-}
-
-// CheckpointAggregator updates the checkpoint.N aggregations.
-type CheckpointAggregator struct {
-	// logID -> sorted (by N, inc) list of aggregated checkpoints.
-	LogAggregatedCheckpoints map[string][]AggregatedCheckpoint
-}
-
-func (ca CheckpointAggregator) Add(logID string, rawCP []byte) {
-	_ = ca.LogAggregatedCheckpoints[logID]
-	// TODO(mhutchinson): take a look at the code already in the github distributors
-}
-
-func (ca CheckpointAggregator) Get(logID string, n uint32) ([]byte, error) {
-	acps := ca.LogAggregatedCheckpoints[logID]
-	for _, acp := range acps {
-		if acp.N >= n {
-			return acp.Checkpoint, nil
-		}
-	}
-	return nil, fmt.Errorf("no checkpoint found for log %q with size %d", logID, n)
 }
