@@ -37,6 +37,10 @@ var (
 		verifier: verifierOrDie("Wattle+1c75450a+AYHI4pLRIKv6LEnH+LiozE2HeMUxGXJRVHrg3Nm5UgfY"),
 		signer:   signerOrDie("PRIVATE+KEY+Wattle+1c75450a+ASVbnzJKChp9hp1lUGX9ybsUDQK2WQOnLAefGzahraTg"),
 	}
+	witWaffle = fakeWitness{
+		verifier: verifierOrDie("Waffle+2d9257ba+ATjKQkTEZBrM4IWzhhiBiEqCKkbmgm+JwElTDfiwEKpD"),
+		signer:   signerOrDie("PRIVATE+KEY+Waffle+2d9257ba+AXcvT+ZS66Y1otACNcq2s6LxHfgY+j340rqpf2aF1/zH"),
+	}
 )
 
 func TestGetLogs(t *testing.T) {
@@ -361,9 +365,13 @@ func TestGetCheckpointWitness(t *testing.T) {
 }
 
 func TestGetCheckpointN(t *testing.T) {
+	// The base case for this test is that 2 checkpoints have already been written:
+	//  - whittle, at tree size 16
+	//  - waffle, at tree size 14
 	ws := distributor.Witnesses{
 		"Whittle": witWhittle.verifier,
 		"Wattle":  witWattle.verifier,
+		"Waffle":  witWaffle.verifier,
 	}
 	ls := distributor.Logs{
 		"FooLog": logFoo.LogInfo,
@@ -414,6 +422,17 @@ func TestGetCheckpointN(t *testing.T) {
 			wantWits: []note.Verifier{witWattle.verifier, witWhittle.verifier},
 		},
 		{
+			desc:     "merge with smaller checkpoint",
+			distWit:  witWattle,
+			distLog:  logFoo,
+			distSize: 14,
+			reqLog:   "FooLog",
+			reqN:     2,
+			wantErr:  false,
+			wantSize: 14,
+			wantWits: []note.Verifier{witWattle.verifier, witWaffle.verifier},
+		},
+		{
 			desc:     "more sigs can be returned than needed",
 			distWit:  witWattle,
 			distLog:  logFoo,
@@ -445,6 +464,9 @@ func TestGetCheckpointN(t *testing.T) {
 				t.Fatalf("Init(): %v", err)
 			}
 			if err := d.Distribute(context.Background(), "FooLog", "Whittle", logFoo.checkpoint(16, "16", witWhittle.signer)); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.Distribute(context.Background(), "FooLog", "Waffle", logFoo.checkpoint(14, "14", witWaffle.signer)); err != nil {
 				t.Fatal(err)
 			}
 

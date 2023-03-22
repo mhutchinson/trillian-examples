@@ -46,14 +46,30 @@ type Distributor struct {
 }
 
 func (d *Distributor) Init() error {
-	_, err := d.db.Exec(`CREATE TABLE IF NOT EXISTS chkpts (
+	if _, err := d.db.Exec(`CREATE TABLE IF NOT EXISTS chkpts (
 		logID BLOB,
 		witID BLOB,
 		treeSize INTEGER,
 		chkpt BLOB,
 		PRIMARY KEY (logID, witID)
-		)`)
-	return err
+		)`); err != nil {
+		return err
+	}
+	// TODO(mhutchinson): simple incremental approach doesn't work:
+	// - cp(w1, ts=3) // N1 = w1
+	// - cp(w2, ts=2) // N1 = w1
+	// - cp(w3, ts=2) // N1 = w1, N2 = w2,w3
+	// Last path can't happen if we only ever try to grow N-1 to N though
+	// if _, err := d.db.Exec(`CREATE TABLE IF NOT EXISTS aggregated (
+	// 	logID BLOB,
+	// 	numSigs INTEGER,
+	// 	treeSize INTEGER,
+	// 	chkpt BLOB,
+	// 	PRIMARY KEY (logID, numSigs)
+	// 	)`); err != nil {
+	// 	return err
+	// }
+	return nil
 }
 
 // GetLogs returns a list of all logs the distributor is aware of.
