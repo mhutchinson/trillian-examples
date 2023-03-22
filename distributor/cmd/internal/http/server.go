@@ -77,7 +77,7 @@ func (s *Server) getCheckpointN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Get the signed checkpoint from the witness.
-	chkpt, err := s.d.GetCheckpointN(logID, uint32(numSigs))
+	chkpt, err := s.d.GetCheckpointN(r.Context(), logID, uint32(numSigs))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to get checkpoint: %v", err), httpForCode(status.Code(err)))
 		return
