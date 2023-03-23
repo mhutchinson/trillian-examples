@@ -44,27 +44,27 @@ var (
 )
 
 func TestGetLogs(t *testing.T) {
-	ws := distributor.Witnesses{}
+	ws := map[string]note.Verifier{}
 	testCases := []struct {
 		desc string
-		logs distributor.Logs
+		logs map[string]distributor.LogInfo
 		want []string
 	}{
 		{
 			desc: "No logs",
-			logs: distributor.Logs{},
+			logs: map[string]distributor.LogInfo{},
 			want: []string{},
 		},
 		{
 			desc: "One log",
-			logs: distributor.Logs{
+			logs: map[string]distributor.LogInfo{
 				"FooLog": logFoo.LogInfo,
 			},
 			want: []string{"FooLog"},
 		},
 		{
 			desc: "Two logs",
-			logs: distributor.Logs{
+			logs: map[string]distributor.LogInfo{
 				"FooLog": logFoo.LogInfo,
 				"BarLog": logBar.LogInfo,
 			},
@@ -93,11 +93,11 @@ func TestGetLogs(t *testing.T) {
 }
 
 func TestDistributeLogAndWitnessMustMatchCheckpoint(t *testing.T) {
-	ws := distributor.Witnesses{
+	ws := map[string]note.Verifier{
 		"Whittle": witWhittle.verifier,
 		"Wattle":  witWattle.verifier,
 	}
-	ls := distributor.Logs{
+	ls := map[string]distributor.LogInfo{
 		"FooLog": logFoo.LogInfo,
 		"BarLog": logBar.LogInfo,
 	}
@@ -189,11 +189,11 @@ func TestDistributeLogAndWitnessMustMatchCheckpoint(t *testing.T) {
 func TestDistributeEvolution(t *testing.T) {
 	// The base case for this test is that a single checkpoint has already
 	// been registered for log foo, by whittle, at tree size 16, with root hash H("16").
-	ws := distributor.Witnesses{
+	ws := map[string]note.Verifier{
 		"Whittle": witWhittle.verifier,
 		"Wattle":  witWattle.verifier,
 	}
-	ls := distributor.Logs{
+	ls := map[string]distributor.LogInfo{
 		"FooLog": logFoo.LogInfo,
 		"BarLog": logBar.LogInfo,
 	}
@@ -296,11 +296,11 @@ func TestDistributeEvolution(t *testing.T) {
 func TestGetCheckpointWitness(t *testing.T) {
 	// The base case for this test is that a single checkpoint has already
 	// been registered for log foo, by whittle, at tree size 16, with root hash H("16").
-	ws := distributor.Witnesses{
+	ws := map[string]note.Verifier{
 		"Whittle": witWhittle.verifier,
 		"Wattle":  witWattle.verifier,
 	}
-	ls := distributor.Logs{
+	ls := map[string]distributor.LogInfo{
 		"FooLog": logFoo.LogInfo,
 		"BarLog": logBar.LogInfo,
 	}
@@ -368,12 +368,12 @@ func TestGetCheckpointN(t *testing.T) {
 	// The base case for this test is that 2 checkpoints have already been written:
 	//  - whittle, at tree size 16
 	//  - waffle, at tree size 14
-	ws := distributor.Witnesses{
+	ws := map[string]note.Verifier{
 		"Whittle": witWhittle.verifier,
 		"Wattle":  witWattle.verifier,
 		"Waffle":  witWaffle.verifier,
 	}
-	ls := distributor.Logs{
+	ls := map[string]distributor.LogInfo{
 		"FooLog": logFoo.LogInfo,
 		"BarLog": logBar.LogInfo,
 	}
@@ -388,6 +388,15 @@ func TestGetCheckpointN(t *testing.T) {
 		wantSize uint64
 		wantWits []note.Verifier
 	}{
+		{
+			desc:     "unknown log is error",
+			distWit:  witWattle,
+			distLog:  logFoo,
+			distSize: 10,
+			reqLog:   "ThisIsNotTheLogYouAreLookingFor",
+			reqN:     1,
+			wantErr:  true,
+		},
 		{
 			desc:     "smaller checkpoint doesn't win",
 			distWit:  witWattle,
@@ -470,7 +479,7 @@ func TestGetCheckpointN(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := d.Distribute(context.Background(), tC.reqLog, tC.distWit.verifier.Name(), tC.distLog.checkpoint(tC.distSize, fmt.Sprintf("%d", tC.distSize), tC.distWit.signer)); err != nil {
+			if err := d.Distribute(context.Background(), tC.distLog.Verifier.Name(), tC.distWit.verifier.Name(), tC.distLog.checkpoint(tC.distSize, fmt.Sprintf("%d", tC.distSize), tC.distWit.signer)); err != nil {
 				t.Fatal(err)
 			}
 

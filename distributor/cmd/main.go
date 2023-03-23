@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"net"
 	"net/http"
@@ -26,11 +27,13 @@ import (
 	"github.com/google/trillian-examples/distributor/cmd/internal/distributor"
 	ihttp "github.com/google/trillian-examples/distributor/cmd/internal/http"
 	"github.com/gorilla/mux"
+	"golang.org/x/mod/sumdb/note"
 	"golang.org/x/sync/errgroup"
 )
 
 var (
-	addr = flag.String("listen", ":8080", "Address to listen on")
+	addr   = flag.String("listen", ":8080", "Address to listen on")
+	dbFile = flag.String("db_file", "", "Path to database file")
 )
 
 func main() {
@@ -45,9 +48,25 @@ func main() {
 		glog.Fatalf("failed to listen on %q", *addr)
 	}
 
-	d := distributor.Distributor{}
+	// TODO(mhutchinson): These need to be initialized
+	ws := make(map[string]note.Verifier)
+	ls := make(map[string]distributor.LogInfo)
+	// TODO(mhutchinson): This should be a non-sqlite DB
+	if len(*dbFile) == 0 {
+		glog.Fatalf("db_file is required")
+	}
+	// Start up local database.
+	glog.Infof("Connecting to local DB at %q", *dbFile)
+	db, err := sql.Open("sqlite3", *dbFile)
+	if err != nil {
+		glog.Fatalf("Failed to connect to DB: %v", err)
+	}
+	// Avoid "database locked" issues with multiple concurrent updates.
+	db.SetMaxOpenConns(1)
+
+	d := distributor.NewDistributor(ws, ls, db)
 	r := mux.NewRouter()
-	s := ihttp.NewServer(&d)
+	s := ihttp.NewServer(d)
 	s.RegisterHandlers(r)
 	srv := http.Server{
 		Handler: r,
