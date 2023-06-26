@@ -48,30 +48,32 @@ type LogInfo struct {
 // `ws` is a map from witness ID (verifier key name) to the note verifier.
 // `ls` is a map from log ID (github.com/transparency-dev/formats/log.ID) to log info.
 func NewDistributor(ws map[string]note.Verifier, ls map[string]LogInfo, db *sql.DB) (*Distributor, error) {
+	logIDs := make([]string, 0, len(ls))
+	for k := range ls {
+		logIDs = append(logIDs, k)
+	}
+	sort.Strings(logIDs)
 	d := &Distributor{
-		ws: ws,
-		ls: ls,
-		db: db,
+		ws:     ws,
+		ls:     ls,
+		logIDs: logIDs,
+		db:     db,
 	}
 	return d, d.init()
 }
 
 // Distributor persists witnessed checkpoints and allows querying of them.
 type Distributor struct {
-	ws map[string]note.Verifier
-	ls map[string]LogInfo
-	db *sql.DB
+	ws     map[string]note.Verifier
+	ls     map[string]LogInfo
+	logIDs []string
+	db     *sql.DB
 }
 
 // GetLogs returns a list of all log IDs the distributor is aware of, sorted
 // by the ID.
 func (d *Distributor) GetLogs(ctx context.Context) ([]string, error) {
-	r := make([]string, 0, len(d.ls))
-	for k := range d.ls {
-		r = append(r, k)
-	}
-	sort.Strings(r)
-	return r, nil
+	return d.logIDs, nil
 }
 
 // GetCheckpointN gets the largest checkpoint for a given log that has at least `n` signatures.
