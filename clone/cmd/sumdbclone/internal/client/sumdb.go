@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 
 	"github.com/golang/glog"
 	"golang.org/x/mod/sumdb/note"

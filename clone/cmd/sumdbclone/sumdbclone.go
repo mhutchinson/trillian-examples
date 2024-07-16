@@ -16,6 +16,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -27,6 +28,8 @@ import (
 	sdbclient "github.com/google/trillian-examples/clone/cmd/sumdbclone/internal/client"
 	"github.com/google/trillian-examples/clone/internal/cloner"
 	"github.com/google/trillian-examples/clone/logdb"
+	"github.com/transparency-dev/merkle/rfc6962"
+	"k8s.io/klog/v2"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -119,6 +122,17 @@ func clone(ctx context.Context, db *logdb.Database, client *sdbclient.SumDBClien
 		}
 		if err != nil {
 			return 0, fmt.Errorf("failed to get leaves at offset %d: %v", offset, err)
+		}
+		hashes, err := client.HashTile(0, offset, len(leaves))
+		if err != nil {
+			return 0, fmt.Errorf("failed to get hashes at offset %d: %v", offset, err)
+		}
+		for i := 0; i < len(hashes); i++ {
+			gotHash := rfc6962.DefaultHasher.HashLeaf(got[i])
+			klog.Errorf("%d `%s`", i, string(got[i]))
+			if !bytes.Equal(hashes[i], gotHash) {
+				return 0, fmt.Errorf("leaf at index %d does not hash to expected value (got %x, want %x). Leaf contents: `%x`", start+uint64(i), gotHash, hashes[i], got[i])
+			}
 		}
 		copy(leaves, got)
 		return uint64(len(leaves)), nil

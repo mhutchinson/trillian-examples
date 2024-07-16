@@ -4,6 +4,8 @@ services:
   db:
     image: mariadb:10.6
     restart: always
+    ports:
+      - 43006:3306
     environment:
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
       MARIADB_DATABASE: ${MARIADB_DATABASE}
