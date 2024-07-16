@@ -145,7 +145,7 @@ func (c *SumDBClient) tilePath(offset int) string {
 func dataToLeaves(data []byte) [][]byte {
 	leaves := bytes.Split(data, []byte{'\n', '\n'})
 	for i, l := range leaves {
-		leaves[i] = append(l, '\n')
+		leaves[i] = append(bytes.TrimSpace(l), '\n')
 	}
 	return leaves
 }
