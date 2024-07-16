@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/golang/glog"
 	"golang.org/x/mod/sumdb/note"
@@ -89,6 +90,27 @@ func (c *SumDBClient) LatestCheckpoint() (*Checkpoint, error) {
 	}
 
 	return &Checkpoint{Tree: &tree, Raw: checkpoint}, nil
+}
+
+// HashTile gets the Nth chunk of 2**height leaves from the hash tiles at the given level.
+// The count parameter says how many leaves are expected, which should be 256 for a full tile.
+func (c *SumDBClient) HashTile(level, offset, count int) ([][]byte, error) {
+	suffix := ""
+	if count < 256 {
+		suffix = fmt.Sprintf(".p/%d", count)
+	}
+	data, err := c.fetcher.GetData(fmt.Sprintf("/tile/%d/%d/%s%s", c.height, level, c.tilePath(offset), suffix))
+	if err != nil {
+		return nil, err
+	}
+	if got, wanted := len(data), count*32; got != wanted {
+		return nil, fmt.Errorf("expected %d bytes but got %d", wanted, got)
+	}
+	res := make([][]byte, count)
+	for i := 0; i < count; i++ {
+		res[i] = data[i*32 : (i+1)*32]
+	}
+	return res, nil
 }
 
 // FullLeavesAtOffset gets the Nth chunk of 2**height leaves.
