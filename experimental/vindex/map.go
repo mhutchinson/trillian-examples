@@ -45,6 +45,8 @@ func NewIndexBuilder(ctx context.Context, log *logdb.Database, mapFn MapFn, walP
 	return b, b.init(ctx)
 }
 
+// IndexBuilder pulls data from a clone log DB, applies a MapFn, and outputs
+// the resulting operations needed on the map to a write-ahead log.
 type IndexBuilder struct {
 	log   *logdb.Database
 	mapFn MapFn
@@ -52,6 +54,7 @@ type IndexBuilder struct {
 }
 
 func (b IndexBuilder) init(ctx context.Context) error {
+	// Ready the write-ahead log, to determine the index we can guarantee we processed
 	idx, err := b.wal.init()
 	if err != nil {
 		return err
@@ -86,19 +89,15 @@ func (b IndexBuilder) pullFromDatabase(ctx context.Context, start uint64) {
 				klog.Exitf("Panic: failed to read leaf at index %d: %v", i, err)
 			}
 			hashes := b.mapFn(l.Leaf)
-			if err := b.addIndex(i, hashes); err != nil {
+			if err := b.wal.append(i, hashes); err != nil {
 				klog.Exitf("failed to add index to entry for leaf %d: %v", i, err)
 			}
+			// TODO(mhutchinson): announce updates to map construction code
 		}
 	}
 
 	// TODO(mhutchinson): the raw log checkpoint needs to be propagated into the map checkpoint
 	_ = rawCp
-}
-
-func (b IndexBuilder) addIndex(idx uint64, hashes [][]byte) error {
-	// TODO(mhutchinson): this should also push this off to the map construction code
-	return b.wal.append(idx, hashes)
 }
 
 type writeAheadLog struct {
