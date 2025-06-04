@@ -18,8 +18,13 @@ package vindex
 
 import (
 	"crypto/sha256"
+	"fmt"
+	"io"
 	"os"
 	"testing"
+	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func TestWriteAheadLog_validate(t *testing.T) {
@@ -128,6 +133,74 @@ func TestWriteAheadLog_roundtrip(t *testing.T) {
 	}
 
 	if err := wal.close(); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestWriteAndWriteLog(t *testing.T) {
+	f, err := os.CreateTemp("", "testWal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(f.Name()); err != nil {
+		t.Fatal(err)
+	}
+
+	wal := &writeAheadLog{
+		walPath: f.Name(),
+	}
+	idx, err := wal.init()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := idx, uint64(0); got != want {
+		t.Fatalf("expected index %d, got %d", want, got)
+	}
+
+	reader, err := newLogReader(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const count = 2056
+	var eg errgroup.Group
+	eg.Go(func() error {
+		for i := range count {
+			hash := sha256.Sum256([]byte{byte(i)})
+			wal.append(uint64(i), [][]byte{hash[:]})
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		var expect uint64
+		for expect < count {
+			idx, _, err := reader.next()
+			if err != nil {
+				if err != io.EOF {
+					return err
+				}
+				// Wait a small amount of time for more data to become available
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			if got, want := idx, expect; got != want {
+				return fmt.Errorf("expected index %d, got %d", want, got)
+			}
+			expect++
+		}
+		return nil
+	})
+	if err := eg.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := wal.close(); err != nil {
+		t.Error(err)
+	}
+	if err := reader.close(); err != nil {
 		t.Error(err)
 	}
 }

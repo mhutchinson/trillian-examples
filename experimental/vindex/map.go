@@ -17,10 +17,12 @@
 package vindex
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -205,6 +207,46 @@ func (l *writeAheadLog) append(idx uint64, hashes [][]byte) error {
 	}
 	l.f.WriteString(fmt.Sprintf("%s\n", e))
 	return nil
+}
+
+func newLogReader(path string) (*logReader, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	return &logReader{
+		f: f,
+		r: bufio.NewReader(f),
+	}, nil
+}
+
+type logReader struct {
+	f       *os.File
+	r       *bufio.Reader
+	partial string
+}
+
+// next returns the next index, hashes, and any error.
+// TODO(mhutchinson): change this as its inconvenient with EOF handling,
+// which should be common when reader hits the end of the file but more is
+// to be written.
+func (r *logReader) next() (uint64, [][]byte, error) {
+	line, err := r.r.ReadString('\n')
+	if err != nil {
+		if err == io.EOF {
+			r.partial = line
+		}
+		return 0, nil, err
+	}
+
+	// Make sure any partial lines are prepended, and drop the final newline
+	line = r.partial + line[:len(line)-1]
+	r.partial = ""
+	return unmarshalWalEntry(line)
+}
+
+func (r *logReader) close() error {
+	return r.f.Close()
 }
 
 // unmarshalWalEntry parses a line from the WAL.
