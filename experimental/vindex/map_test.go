@@ -27,7 +27,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func TestWriteAheadLog_validate(t *testing.T) {
+func TestWriteAheadLog_init(t *testing.T) {
 	testCases := []struct {
 		desc         string
 		fileContents string
@@ -40,14 +40,19 @@ func TestWriteAheadLog_validate(t *testing.T) {
 			wantIdx:      0,
 			wantErr:      false,
 		}, {
+			desc:         "0 file",
+			fileContents: "0\n",
+			wantIdx:      1,
+			wantErr:      false,
+		}, {
 			desc:         "just indexes",
 			fileContents: "0\n1\n2\n",
-			wantIdx:      2,
+			wantIdx:      3,
 			wantErr:      false,
 		}, {
 			desc:         "indexes and hashes",
 			fileContents: "1 deadbeef feed0124\n",
-			wantIdx:      1,
+			wantIdx:      2,
 			wantErr:      false,
 		}, {
 			desc:         "trailing corruption",
@@ -78,10 +83,13 @@ func TestWriteAheadLog_validate(t *testing.T) {
 			wal := &writeAheadLog{
 				walPath: f.Name(),
 			}
-			idx, err := wal.validate()
+			idx, err := wal.init()
 			if gotErr := err != nil; gotErr != tC.wantErr {
 				t.Fatalf("wantErr != gotErr (%t != %t) %v", tC.wantErr, gotErr, err)
 			}
+			defer func() {
+				_ = wal.close()
+			}()
 			if tC.wantErr {
 				return
 			}
@@ -128,7 +136,7 @@ func TestWriteAheadLog_roundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := idx, uint64(32); got != want {
+	if got, want := idx, uint64(33); got != want {
 		t.Fatalf("expected index %d, got %d", want, got)
 	}
 

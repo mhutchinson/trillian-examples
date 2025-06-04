@@ -66,10 +66,8 @@ func (b IndexBuilder) init(ctx context.Context) error {
 		return err
 	}
 
-	// Kick off a thread to read from the DB from the index onwards and:
-	//  - update the WAL
-	//  - announce new updates via a channel (TODO)
-
+	// Kick off a thread to read from the DB wherever the WAL was last written.
+	// This thread will only write to the WAL.
 	go b.pullFromDatabase(ctx, idx)
 
 	// Kick off a thread to:
@@ -111,8 +109,11 @@ type writeAheadLog struct {
 	f       *os.File
 }
 
-// init verifies that the log is in good shape, and returns the last logged index.
+// init verifies that the log is in good shape, and returns the index that is expected next.
 // It also opens the log for appending to.
+//
+// Note that it returns the next expected index to avoid awkwardness with the meaning of 0,
+// which could mean 0 was successfully read from a previous run, or that there was no log.
 func (l *writeAheadLog) init() (uint64, error) {
 	idx, err := l.validate()
 
@@ -122,9 +123,15 @@ func (l *writeAheadLog) init() (uint64, error) {
 			return idx, err
 		}
 		ffs |= os.O_CREATE
+	} else {
+		// If the file exists, then we expect the next index to be returned
+		idx++
 	}
 	// Open the file for writing in append-only, creating it if needed
 	l.f, err = os.OpenFile(l.walPath, ffs, 0666)
+	if err != nil {
+		return 0, fmt.Errorf("failed to open file for writing: %s", err)
+	}
 	return idx, err
 }
 
@@ -151,7 +158,10 @@ func (l *writeAheadLog) validate() (uint64, error) {
 	// Handle trivial case of empty file
 	size := fi.Size()
 	if size == 0 {
-		return 0, nil
+		if err := os.Remove(l.walPath); err != nil {
+			return 0, fmt.Errorf("failed to delete empty file: %s", err)
+		}
+		return 0, os.ErrNotExist
 	}
 
 	// Confirm last character is a newline
