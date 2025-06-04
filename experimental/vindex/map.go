@@ -21,6 +21,8 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -108,7 +110,7 @@ type writeAheadLog struct {
 
 // init reads the file and determines what the last mapped log index was, and returns it.
 // This method populates entries with the lines from the WAL up to and including the last
-// good entry.
+// good entry. The assumption is that all lines ending with a newline were written correctly.
 func (l *writeAheadLog) init() (uint64, error) {
 	f, err := os.Open(l.walPath)
 	if err != nil {
@@ -118,23 +120,29 @@ func (l *writeAheadLog) init() (uint64, error) {
 		_ = f.Close()
 	}()
 
-	scanner := bufio.NewScanner(f)
+	r := bufio.NewReader(f)
+
 	l.entries = make([]string, 0, 64)
-	for scanner.Scan() {
-		l.entries = append(l.entries, scanner.Text())
+	for {
+		var line []byte
+		line, err = r.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF {
+				// Don't append any trailing line that doesn't end with newline
+				break
+			}
+			return 0, err
+		}
+		// strip off the newline
+		l.entries = append(l.entries, string(line[:len(line)-1]))
 	}
 
-	// Parse from the end, being tolerant of any corruption on final entries.
-	// Any corrupt entries are dropped.
-	for len(l.entries) > 0 {
-		lastEntry := l.entries[len(l.entries)-1]
-		idx, _, err := unmarshalWalEntry(lastEntry)
-		if err == nil {
-			return idx, nil
-		}
-		l.entries = l.entries[:len(l.entries)-1]
+	if len(l.entries) == 0 {
+		return 0, nil
 	}
-	return 0, nil
+	lastEntry := l.entries[len(l.entries)-1]
+	idx, _, err := unmarshalWalEntry(lastEntry)
+	return idx, err
 }
 
 func (l *writeAheadLog) append(idx uint64, hashes [][]byte) error {
@@ -151,6 +159,7 @@ func (l *writeAheadLog) append(idx uint64, hashes [][]byte) error {
 // This is the reverse of marshalWalEntry.
 func unmarshalWalEntry(e string) (uint64, [][]byte, error) {
 	tokens := strings.Split(e, " ")
+	log.Print(e)
 	idx, err := strconv.ParseUint(tokens[0], 10, 64)
 	if err != nil {
 		return 0, nil, fmt.Errorf("failed to parse idx from %q", e)

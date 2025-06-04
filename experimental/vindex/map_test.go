@@ -52,11 +52,11 @@ func TestWriteAheadLog_init(t *testing.T) {
 			desc:         "lots of newlines",
 			fileContents: "1\n2\n3\n\n",
 			wantIdx:      3,
-			wantErr:      false,
+			wantErr:      true,
 		}, {
 			desc:         "no trailing newlines",
 			fileContents: "1\n2\n3",
-			wantIdx:      3,
+			wantIdx:      2,
 			wantErr:      false,
 		},
 	}
