@@ -17,11 +17,12 @@
 package vindex
 
 import (
+	"crypto/sha256"
 	"os"
 	"testing"
 )
 
-func TestWriteAheadLog_init(t *testing.T) {
+func TestWriteAheadLog_validate(t *testing.T) {
 	testCases := []struct {
 		desc         string
 		fileContents string
@@ -46,18 +47,15 @@ func TestWriteAheadLog_init(t *testing.T) {
 		}, {
 			desc:         "trailing corruption",
 			fileContents: "1\n2 fdfxx",
-			wantIdx:      1,
-			wantErr:      false,
+			wantErr:      true,
 		}, {
 			desc:         "lots of newlines",
 			fileContents: "1\n2\n3\n\n",
-			wantIdx:      3,
 			wantErr:      true,
 		}, {
 			desc:         "no trailing newlines",
 			fileContents: "1\n2\n3",
-			wantIdx:      2,
-			wantErr:      false,
+			wantErr:      true,
 		},
 	}
 	for _, tC := range testCases {
@@ -75,7 +73,7 @@ func TestWriteAheadLog_init(t *testing.T) {
 			wal := &writeAheadLog{
 				walPath: f.Name(),
 			}
-			idx, err := wal.init()
+			idx, err := wal.validate()
 			if gotErr := err != nil; gotErr != tC.wantErr {
 				t.Fatalf("wantErr != gotErr (%t != %t) %v", tC.wantErr, gotErr, err)
 			}
@@ -86,6 +84,51 @@ func TestWriteAheadLog_init(t *testing.T) {
 				t.Errorf("want idx %v but got %v", tC.wantIdx, idx)
 			}
 		})
+	}
+}
+
+func TestWriteAheadLog_roundtrip(t *testing.T) {
+	f, err := os.CreateTemp("", "testWal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(f.Name()); err != nil {
+		t.Fatal(err)
+	}
+
+	wal := &writeAheadLog{
+		walPath: f.Name(),
+	}
+	idx, err := wal.init()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := idx, uint64(0); got != want {
+		t.Fatalf("expected index %d, got %d", want, got)
+	}
+
+	for i := range 33 {
+		hash := sha256.Sum256([]byte{byte(i)})
+		wal.append(uint64(i), [][]byte{hash[:]})
+	}
+
+	if err := wal.close(); err != nil {
+		t.Error(err)
+	}
+
+	idx, err = wal.init()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := idx, uint64(32); got != want {
+		t.Fatalf("expected index %d, got %d", want, got)
+	}
+
+	if err := wal.close(); err != nil {
+		t.Error(err)
 	}
 }
 
